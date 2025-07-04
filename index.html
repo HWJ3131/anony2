@@ -97,6 +97,19 @@
       background: #fff;
       border-radius: 8px;
     }
+    .reply-input {
+      margin-left: 20px;
+    }
+    .like-btn {
+      background: #eee;
+      color: #333;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 15px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-top: 5px;
+    }
   </style>
 </head>
 <body>
@@ -130,7 +143,6 @@
     firebase.initializeApp(config);
     const db = firebase.firestore();
     const auth = firebase.auth();
-
     const statusBox = document.getElementById('statusBox');
 
     auth.signInAnonymously().then(() => {
@@ -147,7 +159,7 @@
       const content = document.getElementById('content').value.trim();
       if (!title) return alert("제목을 입력하세요");
       db.collection("posts").add({
-        title, content,
+        title, content, likes: 0,
         author: randomName(),
         createdAt: new Date().toISOString(),
         timestamp: firebase.firestore.FieldValue.serverTimestamp()
@@ -156,11 +168,11 @@
       document.getElementById('content').value = '';
     }
 
-    function addComment(postId, textArea) {
+    function addComment(postId, textArea, parentId = null) {
       const text = textArea.value.trim();
       if (!text) return;
       db.collection("comments").add({
-        postId, text,
+        postId, text, parentId,
         author: randomName(),
         createdAt: new Date().toISOString(),
         timestamp: firebase.firestore.FieldValue.serverTimestamp()
@@ -179,6 +191,7 @@
           div.innerHTML = `<strong>${data.title}</strong>
             <div class="meta">🕛 ${new Date(data.createdAt).toLocaleString()} | ${data.author}</div>
             <p>${data.content || ''}</p>
+            <button class="like-btn" onclick="likePost('${doc.id}')">👍 추천 (${data.likes || 0})</button>
             <textarea placeholder="댓글 입력"></textarea>
             <button onclick="addComment('${doc.id}', this.previousElementSibling)">댓글 작성</button>
             <div id="comments-${doc.id}"></div>`;
@@ -188,21 +201,38 @@
       });
     }
 
+    function likePost(postId) {
+      const ref = db.collection("posts").doc(postId);
+      ref.update({ likes: firebase.firestore.FieldValue.increment(1) });
+    }
+
     function loadComments() {
       db.collection("comments").orderBy("timestamp").onSnapshot(snapshot => {
         const all = {};
         snapshot.forEach(doc => {
           const c = doc.data();
           if (!all[c.postId]) all[c.postId] = [];
-          all[c.postId].push(`<div class="comment">
-            <div class="meta">🕛 ${new Date(c.createdAt).toLocaleString()} | ${c.author}</div>
-            <p>${c.text}</p></div>`);
+          all[c.postId].push({ id: doc.id, ...c });
         });
         Object.keys(all).forEach(postId => {
           const container = document.getElementById(`comments-${postId}`);
-          if (container) container.innerHTML = all[postId].join('');
+          if (container) container.innerHTML = renderComments(all[postId], null, postId);
         });
       });
+    }
+
+    function renderComments(list, parentId, postId) {
+      return list
+        .filter(c => c.parentId === parentId)
+        .map(c => `
+          <div class="comment">
+            <div class="meta">🕛 ${new Date(c.createdAt).toLocaleString()} | ${c.author}</div>
+            <p>${c.text}</p>
+            <textarea class="reply-input" placeholder="대댓글 입력"></textarea>
+            <button onclick="addComment('${postId}', this.previousElementSibling, '${c.id}')">답글</button>
+            ${renderComments(list, c.id, postId)}
+          </div>
+        `).join('');
     }
 
     function randomName() {
